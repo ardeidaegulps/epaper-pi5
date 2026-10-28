@@ -10,5 +10,6 @@ gpiocdev = "0.8.0"
 serde = { version = "1.0.229", features = ["derive"] }
 spidev = "0.7.1"
 time = { version = "0.3", features = ["serde", "parsing"] }
+tokio = { version = "1.54.1", features = ["rt", "macros", "sync", "time", "process", "fs"] }
 toml = "0.8"
 toml-datetime-compat = { version = "0.3.0", features = ["serde_with", "time"] }
