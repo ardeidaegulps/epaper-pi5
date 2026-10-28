@@ -5,7 +5,9 @@ use std::env;
 use std::fs;
 use std::io::Write;
 use std::thread::sleep;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
+
+const WATCH_INTERVAL_SECS: u64 = 5;
 
 mod layout;
 
@@ -172,14 +174,35 @@ fn load_frame(name: &str) -> Result<Vec<u8>> {
     Ok(pattern(name))
 }
 
-fn main() -> Result<()> {
-    let name = env::args().nth(1).unwrap_or_else(|| "checker".to_string());
-    let frame = load_frame(&name)?;
-
+fn show_frame(frame: &[u8]) -> Result<()> {
     let mut epd = Epd::open()?;
     epd.init()?;
-    epd.show(&frame)?;
-    epd.sleep_mode()?;
+    epd.show(frame)?;
+    epd.sleep_mode()
+}
+
+fn watch_layout() -> Result<()> {
+    let mut shown: Option<Option<SystemTime>> = None;
+    loop {
+        let modified = fs::metadata(layout::REPORT_PATH)
+            .and_then(|meta| meta.modified())
+            .ok();
+        if shown != Some(modified) {
+            show_frame(&layout::render())?;
+            println!("displayed layout from {}", layout::REPORT_PATH);
+            shown = Some(modified);
+        }
+        sleep(Duration::from_secs(WATCH_INTERVAL_SECS));
+    }
+}
+
+fn main() -> Result<()> {
+    let name = env::args().nth(1).unwrap_or_else(|| "checker".to_string());
+    if name == "layout" {
+        return watch_layout();
+    }
+    let frame = load_frame(&name)?;
+    show_frame(&frame)?;
     println!("displayed pattern: {name}");
     Ok(())
 }

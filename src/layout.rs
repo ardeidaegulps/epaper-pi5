@@ -1,14 +1,21 @@
 use crate::{FRAME_LEN, WIDTH_BYTES};
+use embedded_graphics::image::Image;
 use embedded_graphics::mono_font::ascii::{FONT_6X10, FONT_7X13_BOLD, FONT_10X20};
 use embedded_graphics::mono_font::{MonoFont, MonoTextStyle};
 use embedded_graphics::pixelcolor::BinaryColor;
 use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::{PrimitiveStyle, Rectangle};
 use embedded_graphics::text::{Baseline, Text};
+use embedded_iconoir::icons::size24px::actions::CheckCircle;
+use embedded_iconoir::prelude::IconoirNewIcon;
+use serde::Deserialize;
 use std::borrow::Cow;
 use std::collections::VecDeque;
 use std::convert::Infallible;
+use std::fs;
+use std::process::Command;
 use std::time::Duration;
+use time::OffsetDateTime;
 
 const WIDTH: i32 = crate::HEIGHT as i32;
 const HEIGHT: i32 = (WIDTH_BYTES * 8) as i32;
@@ -26,17 +33,90 @@ const ENTRY_HEIGHT: i32 = 2 * LINE_HEIGHT + PADDING;
 const ENTRY_TOP: i32 = 18;
 const ID_RIGHT: i32 = 30;
 const MESSAGE_LEFT: i32 = 34;
+const ICON_SIZE: i32 = 24;
+
+pub const REPORT_PATH: &str = "/massdata/ota/update-report-pending.toml.tmp";
+const INCIDENT_SLOTS: usize = 3;
+
+#[derive(Deserialize)]
+struct UpdateReport {
+    fingerprint: String,
+    passed: u64,
+    failed: u64,
+    runs: Vec<UpdateRun>,
+    incidents: Vec<UpdateIncident>,
+}
+
+#[derive(Deserialize)]
+struct UpdateRun {
+    #[serde(with = "toml_datetime_compat")]
+    update_start: OffsetDateTime,
+    #[serde(with = "toml_datetime_compat")]
+    update_end: OffsetDateTime,
+}
+
+#[derive(Deserialize)]
+struct UpdateIncident {
+    reason: String,
+}
 
 struct Layout {
-    incidents: VecDeque<(u8, String)>,
-    failed: u8,
-    passed: u8,
+    incidents: VecDeque<(u64, String)>,
+    failed: u64,
+    passed: u64,
     tool_version: String,
     average_time: Duration,
     service_status: String,
 }
 
 impl Layout {
+    fn load() -> Self {
+        match fs::read_to_string(REPORT_PATH)
+            .map_err(|e| e.to_string())
+            .and_then(|text| toml::from_str::<UpdateReport>(&text).map_err(|e| e.to_string()))
+        {
+            Ok(report) => Self::from_report(&report),
+            Err(error) => {
+                eprintln!("layout: {REPORT_PATH}: {error}, using placeholder");
+                Self::new()
+            }
+        }
+    }
+
+    fn from_report(report: &UpdateReport) -> Self {
+        let incidents = report
+            .incidents
+            .iter()
+            .enumerate()
+            .rev()
+            .take(INCIDENT_SLOTS)
+            .map(|(index, incident)| ((index + 1) as u64, incident.reason.clone()))
+            .collect();
+        let total_ns: i128 = report
+            .runs
+            .iter()
+            .map(|run| (run.update_end - run.update_start).whole_nanoseconds())
+            .sum();
+        let average_secs = match report.runs.len() {
+            0 => 0,
+            count => (total_ns / count as i128 / 1_000_000_000).max(0) as u64,
+        };
+        let tool_version = report
+            .fingerprint
+            .split_whitespace()
+            .nth(1)
+            .map(|version| format!("v{version}"))
+            .unwrap_or_else(|| report.fingerprint.clone());
+        Self {
+            incidents,
+            failed: report.failed,
+            passed: report.passed,
+            tool_version,
+            average_time: Duration::from_secs(average_secs),
+            service_status: read_service_status(),
+        }
+    }
+
     fn new() -> Self {
         Self {
             incidents: [(10, FIRST_MESSAGE), (9, SECOND_MESSAGE), (7, THIRD_MESSAGE)]
@@ -47,7 +127,7 @@ impl Layout {
             passed: 12,
             tool_version: "v0.1.0".to_string(),
             average_time: Duration::from_secs(90),
-            service_status: "RUNNING".to_string(),
+            service_status: read_service_status(),
         }
     }
 
@@ -81,7 +161,7 @@ impl Layout {
             ("VERSION", Cow::Borrowed(&self.tool_version), AREA_C),
             (
                 "AVG TIME",
-                Cow::Owned(format!("{:?}", self.average_time)),
+                Cow::Owned(format_minutes_seconds(self.average_time)),
                 AREA_D,
             ),
             ("SERVICE", Cow::Borrowed(&self.service_status), AREA_E),
@@ -98,6 +178,33 @@ impl Layout {
         }
         items
     }
+}
+
+fn format_minutes_seconds(duration: Duration) -> String {
+    let secs = duration.as_secs();
+    format!("{}m{}s", secs / 60, secs % 60)
+}
+
+fn read_service_status() -> String {
+    let output = match Command::new("systemctl")
+        .args(["status", "offline-update", "--no-pager"])
+        .output()
+    {
+        Ok(output) => output,
+        Err(_) => return "UNKNOWN".to_string(),
+    };
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("Active:"))
+        .map(|state| {
+            let state = state.split(" since ").next().unwrap_or(state).trim();
+            let word = match (state.find('('), state.rfind(')')) {
+                (Some(open), Some(close)) if open < close => &state[open + 1..close],
+                _ => state.split_whitespace().next().unwrap_or(state),
+            };
+            word.to_uppercase()
+        })
+        .unwrap_or_else(|| "UNKNOWN".to_string())
 }
 
 #[derive(Clone, Copy)]
@@ -272,7 +379,7 @@ fn draw_text(canvas: &mut Canvas, text: &str, x: i32, y: i32, font: &MonoFont<'_
 pub fn render() -> Vec<u8> {
     let mut frame = vec![0xFFu8; FRAME_LEN];
     let mut canvas = Canvas { frame: &mut frame };
-    let layout = Layout::new();
+    let layout = Layout::load();
     if DEBUG_GRID {
         for rect in [AREA_A, AREA_B, AREA_C, AREA_D, AREA_E] {
             let outline = Rectangle::new(
@@ -286,6 +393,12 @@ pub fn render() -> Vec<u8> {
     }
     for item in layout.as_items() {
         draw_text(&mut canvas, &item.text, item.x, item.y, item.font);
+    }
+    if layout.incidents.is_empty() {
+        let icon = CheckCircle::new(BinaryColor::On);
+        let x = AREA_A.x + (AREA_A.w - ICON_SIZE) / 2;
+        let y = AREA_A.y + (AREA_A.h - ICON_SIZE) / 2;
+        let _ = Image::new(&icon, Point::new(x, y)).draw(&mut canvas);
     }
     frame
 }
