@@ -12,6 +12,7 @@ pub const REPORT_PATHS: [&str; 3] = [
 pub struct Model {
     pub report: Option<UpdateReport>,
     pub service_status: String,
+    pub ethernet_status: String,
     pub next_refresh: u64,
     pub pending_refresh: Option<u64>,
 }

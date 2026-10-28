@@ -40,7 +40,7 @@ const INCIDENT_SLOTS: usize = 3;
 pub struct View {
     incidents: Vec<(u64, String)>,
     failure_rate: Option<String>,
-    tool_version: Option<String>,
+    ethernet_status: Option<String>,
     average_time: Option<String>,
     service_status: Option<String>,
 }
@@ -50,12 +50,14 @@ const UNAVAILABLE: &str = "---";
 impl View {
     pub fn from_model(model: &Model) -> Self {
         match &model.report {
-            Some(report) if !DEBUG_PLACEHOLDER => Self::from_report(report, &model.service_status),
+            Some(report) if !DEBUG_PLACEHOLDER => {
+                Self::from_report(report, &model.service_status, &model.ethernet_status)
+            }
             _ => Self::default(),
         }
     }
 
-    fn from_report(report: &UpdateReport, service_status: &str) -> Self {
+    fn from_report(report: &UpdateReport, service_status: &str, ethernet_status: &str) -> Self {
         let incidents = report
             .runs
             .iter()
@@ -76,13 +78,9 @@ impl View {
         let total_time: time::Duration = passed_runs
             .map(|run| run.update_end - run.update_start)
             .sum();
-        let average_time = total_time.checked_div(passed_count).map(format_minutes_seconds);
-        let tool_version = report
-            .fingerprint
-            .split_whitespace()
-            .nth(1)
-            .map(|version| format!("v{version}"))
-            .unwrap_or_else(|| report.fingerprint.clone());
+        let average_time = total_time
+            .checked_div(passed_count)
+            .map(format_minutes_seconds);
         Self {
             incidents,
             failure_rate: Some(format!(
@@ -90,7 +88,7 @@ impl View {
                 report.failed,
                 report.failed + report.passed
             )),
-            tool_version: Some(tool_version),
+            ethernet_status: Some(ethernet_status.to_string()),
             average_time,
             service_status: Some(service_status.to_string()),
         }
@@ -110,9 +108,9 @@ impl View {
         ));
 
         let stacks: [(&str, Option<&str>, Rect); 3] = [
-            ("VERSION", self.tool_version.as_deref(), AREA_C),
-            ("AVG TIME", self.average_time.as_deref(), AREA_D),
-            ("SERVICE", self.service_status.as_deref(), AREA_E),
+            ("AVG TIME", self.average_time.as_deref(), AREA_C),
+            ("SERVICE", self.service_status.as_deref(), AREA_D),
+            ("ETHERNET", self.ethernet_status.as_deref(), AREA_E),
         ];
         for (label, value, rect) in stacks {
             let value = value.unwrap_or(UNAVAILABLE);

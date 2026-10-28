@@ -9,7 +9,7 @@ const TICK: Duration = Duration::from_secs(5);
 pub enum Message {
     Bootstrap,
     Tick,
-    Refreshed(u64, Option<UpdateReport>, String),
+    Refreshed(u64, Option<UpdateReport>, String, String),
 }
 
 /// Side effect requested by update, executed by the runtime.
@@ -27,11 +27,12 @@ pub enum Subscription {
 pub fn update(message: Message, mut model: Model) -> (Model, Option<Command>) {
     let command = match message {
         Message::Bootstrap | Message::Tick => request_refresh(&mut model),
-        Message::Refreshed(seq, report, service_status) => {
+        Message::Refreshed(seq, report, service_status, ethernet_status) => {
             if model.pending_refresh == Some(seq) {
                 model.pending_refresh = None;
                 model.report = report;
                 model.service_status = service_status;
+                model.ethernet_status = ethernet_status;
             }
             None
         }
@@ -68,7 +69,10 @@ mod tests {
     #[test]
     fn stale_result_is_ignored() {
         let (model, _) = update(Message::Bootstrap, Model::default());
-        let (model, _) = update(Message::Refreshed(7, None, "ACTIVE".to_string()), model);
+        let (model, _) = update(
+            Message::Refreshed(7, None, "ACTIVE".to_string(), "UP".to_string()),
+            model,
+        );
         assert_eq!(model.pending_refresh, Some(0));
         assert_eq!(model.service_status, "");
     }
@@ -76,9 +80,13 @@ mod tests {
     #[test]
     fn matching_result_clears_pending() {
         let (model, _) = update(Message::Bootstrap, Model::default());
-        let (model, command) = update(Message::Refreshed(0, None, "ACTIVE".to_string()), model);
+        let (model, command) = update(
+            Message::Refreshed(0, None, "ACTIVE".to_string(), "UP".to_string()),
+            model,
+        );
         assert!(command.is_none());
         assert_eq!(model.pending_refresh, None);
         assert_eq!(model.service_status, "ACTIVE");
+        assert_eq!(model.ethernet_status, "UP");
     }
 }

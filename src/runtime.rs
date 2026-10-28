@@ -12,6 +12,7 @@ use crate::view::View;
 const MESSAGE_CAPACITY: usize = 64;
 const REFRESH_TIMEOUT: Duration = Duration::from_secs(10);
 const SERVICE: &str = "offline-update";
+const ETHERNET_HOST: &str = "192.168.225.12";
 
 pub async fn run(epd: Epd) {
     let model = Model::default();
@@ -93,12 +94,14 @@ async fn handle_message_updates(
 async fn perform(command: Command) -> Message {
     match command {
         Command::Refresh(seq) => {
-            let work = async { tokio::join!(read_report(), service_status()) };
+            let work = async { tokio::join!(read_report(), service_status(), ethernet_status()) };
             match timeout(REFRESH_TIMEOUT, work).await {
-                Ok((report, service)) => Message::Refreshed(seq, report, service),
+                Ok((report, service, ethernet)) => {
+                    Message::Refreshed(seq, report, service, ethernet)
+                }
                 Err(_) => {
                     eprintln!("refresh timed out");
-                    Message::Refreshed(seq, None, "UNKNOWN".to_string())
+                    Message::Refreshed(seq, None, "UNKNOWN".to_string(), "UNKNOWN".to_string())
                 }
             }
         }
@@ -116,6 +119,18 @@ async fn read_report() -> Option<UpdateReport> {
         }
     }
     None
+}
+
+async fn ethernet_status() -> String {
+    let status = tokio::process::Command::new("ping")
+        .args(["-c", "1", "-W", "2", ETHERNET_HOST])
+        .output()
+        .await;
+    match status {
+        Ok(out) if out.status.success() => "UP".to_string(),
+        Ok(_) => "DOWN".to_string(),
+        Err(_) => "UNKNOWN".to_string(),
+    }
 }
 
 async fn service_status() -> String {
