@@ -1,4 +1,5 @@
 TARGET ?= aarch64-unknown-linux-gnu
+HOST_TARGET ?= x86_64-unknown-linux-gnu
 BIN := $(shell grep '^name' Cargo.toml | cut -d'"' -f2)
 BIN_PATH := target/$(TARGET)/release/$(BIN)
 
@@ -16,12 +17,15 @@ SCP_CMD ?= sshpass -p $(PI_PASS) scp
 PATTERN ?= layout
 UNIT ?= epaper-layout
 
-.PHONY: all build lint deploy run clean
+.PHONY: all build test lint deploy run clean
 
 all: build
 
 build:
 	cargo build --target $(TARGET) --release
+
+test:
+	cargo test --target $(HOST_TARGET)
 
 lint:
 	cargo clippy --target $(TARGET) -- -D warnings

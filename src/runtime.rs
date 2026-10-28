@@ -7,7 +7,7 @@ use tokio::time::{interval, timeout};
 use crate::epd::Epd;
 use crate::model::{Model, REPORT_PATHS, UpdateReport};
 use crate::update::{self, Command, Message, Subscription};
-use crate::view::View;
+use crate::view;
 
 const MESSAGE_CAPACITY: usize = 64;
 const REFRESH_TIMEOUT: Duration = Duration::from_secs(10);
@@ -16,7 +16,7 @@ const ETHERNET_HOST: &str = "192.168.225.12";
 
 pub async fn run(epd: Epd) {
     let model = Model::default();
-    let (view_tx, view_rx) = watch::channel(View::default());
+    let (view_tx, view_rx) = watch::channel(view::view(&model));
     let (message_tx, message_rx) = mpsc::channel(MESSAGE_CAPACITY);
     let _ = message_tx.send(Message::Bootstrap).await;
     let Subscription::Every(period, tick) = update::subscriptions();
@@ -42,12 +42,12 @@ async fn handle_periodic_ticks(period: Duration, message: Message, tx: mpsc::Sen
     }
 }
 
-async fn handle_view_rendering(mut epd: Epd, mut rx: watch::Receiver<View>) {
+async fn handle_view_rendering(mut epd: Epd, mut rx: watch::Receiver<Vec<u8>>) {
     loop {
         if rx.changed().await.is_err() {
             return;
         }
-        let buffer = rx.borrow_and_update().render();
+        let buffer = rx.borrow_and_update().clone();
         let handle = tokio::task::spawn_blocking(move || {
             let res = epd.show_frame(&buffer);
             (epd, res)
@@ -70,7 +70,7 @@ async fn handle_message_updates(
     mut model: Model,
     mut message_rx: mpsc::Receiver<Message>,
     message_tx: mpsc::Sender<Message>,
-    view_tx: watch::Sender<View>,
+    view_tx: watch::Sender<Vec<u8>>,
 ) {
     while let Some(message) = message_rx.recv().await {
         let (next, command) = update::update(message, model);
@@ -81,10 +81,10 @@ async fn handle_message_updates(
                 let _ = tx.send(message).await;
             });
         }
-        let content = View::from_model(&next);
+        let frame = view::view(&next);
         view_tx.send_if_modified(|current| {
-            let changed = *current != content;
-            *current = content;
+            let changed = *current != frame;
+            *current = frame;
             changed
         });
         model = next;
