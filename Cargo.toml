@@ -6,10 +6,15 @@ edition = "2024"
 [dependencies]
 embedded-graphics = "0.8"
 embedded-iconoir = { version = "0.2.3", features = ["24px"] }
+futures-channel = "0.3"
+futures-util = "0.3.34"
 gpiocdev = "0.8.0"
+inotify = "0.11.5"
+rtnetlink = "0.23.0"
 serde = { version = "1.0.229", features = ["derive"] }
 spidev = "0.7.1"
 time = { version = "0.3", features = ["serde", "parsing"] }
 tokio = { version = "1.54.1", features = ["rt", "macros", "sync", "time", "process", "fs"] }
 toml = "0.8"
 toml-datetime-compat = { version = "0.3.0", features = ["serde_with", "time"] }
+zbus = { version = "5.13.2", default-features = false, features = ["tokio"] }

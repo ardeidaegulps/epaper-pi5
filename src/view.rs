@@ -12,6 +12,7 @@ use embedded_graphics::text::{Alignment, Baseline, Text, TextStyle, TextStyleBui
 use embedded_iconoir::icons::size24px::actions::CheckCircle;
 use embedded_iconoir::icons::size24px::emojis::EmojiPuzzled;
 use embedded_iconoir::prelude::IconoirNewIcon;
+use rtnetlink::packet_route::neighbour::NeighbourState;
 use std::convert::Infallible;
 
 type Result<T> = std::result::Result<T, Infallible>;
@@ -93,8 +94,18 @@ fn draw_frame<T: Target>(model: &Model, canvas: &mut T) -> Result<()> {
     };
     let average = average_time.as_deref().unwrap_or(UNAVAILABLE);
     draw_card(canvas, "AVERAGE", average, AREA_C)?;
-    draw_card(canvas, "SERVICE", model.service_status.as_str(), AREA_D)?;
-    draw_card(canvas, "ETHERNET", model.ethernet_status.as_str(), AREA_E)
+    draw_card(
+        canvas,
+        "SERVICE",
+        &model.service_status.to_uppercase(),
+        AREA_D,
+    )?;
+    draw_card(
+        canvas,
+        "ETHERNET",
+        &ethernet_label(model.ethernet_link_up, model.ethernet_arp),
+        AREA_E,
+    )
 }
 
 fn draw_list<T: Target>(canvas: &mut T, report: &UpdateReport) -> Result<()> {
@@ -181,6 +192,14 @@ fn draw_card<T: Target>(canvas: &mut T, label: &str, value: &str, rect: Rect) ->
     )
     .draw(canvas)?;
     Ok(())
+}
+
+fn ethernet_label(link_up: bool, state: NeighbourState) -> String {
+    if link_up {
+        state.to_string().to_uppercase()
+    } else {
+        "LINK DOWN".to_string()
+    }
 }
 
 fn report(model: &Model) -> Option<&UpdateReport> {
@@ -281,6 +300,7 @@ impl DrawTarget for Canvas<'_> {
 mod tests {
     use super::*;
     use crate::model::UpdateRun;
+    use rtnetlink::packet_route::neighbour::NeighbourState;
     use time::OffsetDateTime;
 
     const EXPECTED: &[u8] = include_bytes!("../tests/fixtures/view.pbm");
@@ -316,7 +336,8 @@ mod tests {
                 ],
             }),
             service_status: "ACTIVE".into(),
-            ethernet_status: "UP".into(),
+            ethernet_link_up: true,
+            ethernet_arp: NeighbourState::Reachable,
             ..Model::default()
         }
     }

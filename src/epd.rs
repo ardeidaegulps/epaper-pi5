@@ -1,5 +1,5 @@
 //! E-paper panel driver over SPI and GPIO.
-use crate::{HEIGHT, WIDTH_BYTES};
+use crate::{FRAME_LEN, HEIGHT, WIDTH_BYTES};
 use gpiocdev::Request;
 use gpiocdev::line::Value;
 use spidev::{SpiModeFlags, Spidev, SpidevOptions};
@@ -152,5 +152,13 @@ impl Epd {
         self.command(0x10)?;
         self.data(&[0x01])?;
         Ok(())
+    }
+}
+
+impl Drop for Epd {
+    fn drop(&mut self) {
+        if let Err(error) = self.show_frame(&[0xFF; FRAME_LEN]) {
+            eprintln!("wipe on drop failed due to {error}");
+        }
     }
 }

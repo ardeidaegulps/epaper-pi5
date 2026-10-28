@@ -1,4 +1,5 @@
 //! Model: holds the application state only.
+use rtnetlink::packet_route::neighbour::NeighbourState;
 use serde::Deserialize;
 use time::OffsetDateTime;
 
@@ -12,9 +13,8 @@ pub const REPORT_PATHS: [&str; 3] = [
 pub struct Model {
     pub report: Option<UpdateReport>,
     pub service_status: String,
-    pub ethernet_status: String,
-    pub next_refresh: u64,
-    pub pending_refresh: Option<u64>,
+    pub ethernet_link_up: bool,
+    pub ethernet_arp: NeighbourState,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize)]
