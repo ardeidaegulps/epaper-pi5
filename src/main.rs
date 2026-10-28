@@ -1,10 +1,13 @@
-use gpiocdev::line::Value;
 use gpiocdev::Request;
+use gpiocdev::line::Value;
 use spidev::{SpiModeFlags, Spidev, SpidevOptions};
 use std::env;
+use std::fs;
 use std::io::Write;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
+
+mod layout;
 
 const SPI_PATH: &str = "/dev/spidev0.0";
 const GPIO_CHIP: &str = "/dev/gpiochip4";
@@ -155,9 +158,23 @@ fn pattern(name: &str) -> Vec<u8> {
     frame
 }
 
+fn load_frame(name: &str) -> Result<Vec<u8>> {
+    if name == "layout" {
+        return Ok(layout::render());
+    }
+    if name.ends_with(".bin") {
+        let data = fs::read(name)?;
+        if data.len() != FRAME_LEN {
+            return Err(format!("{name}: expected {FRAME_LEN} bytes, got {}", data.len()).into());
+        }
+        return Ok(data);
+    }
+    Ok(pattern(name))
+}
+
 fn main() -> Result<()> {
     let name = env::args().nth(1).unwrap_or_else(|| "checker".to_string());
-    let frame = pattern(&name);
+    let frame = load_frame(&name)?;
 
     let mut epd = Epd::open()?;
     epd.init()?;

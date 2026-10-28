@@ -2,7 +2,7 @@ TARGET ?= aarch64-unknown-linux-gnu
 BIN := $(shell grep '^name' Cargo.toml | cut -d'"' -f2)
 BIN_PATH := target/$(TARGET)/release/$(BIN)
 
-PI_HOST ?= 192.168.45.50
+PI_HOST ?= 10.41.110.216
 PI_USER ?= pi
 PI_DIR ?= /home/pi
 PI_TARGET := $(PI_USER)@$(PI_HOST)
@@ -13,7 +13,8 @@ PI_PASS ?=
 SSH_CMD ?= sshpass -p $(PI_PASS) ssh
 SCP_CMD ?= sshpass -p $(PI_PASS) scp
 
-PATTERN ?= checker
+PATTERN ?= layout
+UNIT ?= epaper-layout
 
 .PHONY: all build lint deploy run clean
 
@@ -27,8 +28,9 @@ lint:
 	cargo fmt --check
 
 deploy: build
-	$(SCP_CMD) $(BIN_PATH) $(PI_TARGET):$(PI_DIR)/$(BIN)
-	$(MAKE) run
+	@printf '%s\n' '$(PI_PASS)' | $(SSH_CMD) $(PI_TARGET) 'sudo -S -p "" systemctl stop $(UNIT) 2>/dev/null; true'
+	@$(SCP_CMD) $(BIN_PATH) $(PI_TARGET):$(PI_DIR)/$(BIN)
+	@printf '%s\n' '$(PI_PASS)' | $(SSH_CMD) $(PI_TARGET) 'sudo -S -p "" systemd-run --unit=$(UNIT) --uid=$(PI_USER) --property="SupplementaryGroups=spi gpio" --property=Restart=on-failure --property=RestartSec=10 --working-directory=$(PI_DIR) $(PI_DIR)/$(BIN) $(PATTERN)'
 
 run:
 	$(SSH_CMD) $(PI_TARGET) 'cd $(PI_DIR) && timeout 60 ./$(BIN) $(PATTERN)'
