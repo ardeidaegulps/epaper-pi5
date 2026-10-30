@@ -3,7 +3,7 @@ HOST_TARGET ?= x86_64-unknown-linux-gnu
 BIN := $(shell grep '^name' Cargo.toml | cut -d'"' -f2)
 BIN_PATH := target/$(TARGET)/release/$(BIN)
 
-PI_HOST ?= 10.41.110.216
+PI_HOST ?= 10.224.229.216
 PI_USER ?= pi
 PI_DIR ?= /home/pi
 PI_TARGET := $(PI_USER)@$(PI_HOST)
@@ -17,7 +17,7 @@ SCP_CMD ?= sshpass -p $(PI_PASS) scp
 PATTERN ?= layout
 UNIT ?= epaper-layout
 
-.PHONY: all build test lint deploy run clean
+.PHONY: all build test lint check-pi deploy run clean
 
 all: build
 
@@ -31,7 +31,10 @@ lint:
 	cargo clippy --target $(TARGET) -- -D warnings
 	cargo fmt --check
 
-deploy: build
+check-pi:
+	@ping -c 1 -W 3 $(PI_HOST) >/dev/null 2>&1 || { echo 'Pi $(PI_HOST) is not reachable' >&2; exit 1; }
+
+deploy: check-pi build
 	@printf '%s\n' '$(PI_PASS)' | $(SSH_CMD) $(PI_TARGET) 'sudo -S -p "" systemctl stop $(UNIT) 2>/dev/null; true'
 	@$(SCP_CMD) $(BIN_PATH) $(PI_TARGET):$(PI_DIR)/$(BIN)
 	@printf '%s\n' '$(PI_PASS)' | $(SSH_CMD) $(PI_TARGET) 'sudo -S -p "" systemd-run --unit=$(UNIT) --uid=$(PI_USER) --property="SupplementaryGroups=spi gpio" --property=Restart=on-failure --property=RestartSec=10 --working-directory=$(PI_DIR) $(PI_DIR)/$(BIN) $(PATTERN)'

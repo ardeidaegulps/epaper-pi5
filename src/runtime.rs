@@ -159,6 +159,10 @@ async fn handle_netlink_status(tx: mpsc::Sender<Message>) {
                     }
                     last = Some(state);
                 }
+                // Without a usable neighbour entry, a packet makes the kernel broadcast an ARP request to refresh it.
+                if matches!(state.1, NeighbourState::None | NeighbourState::Failed) {
+                    probe_ethernet_host();
+                }
             }
             // Re-queries after RESYNC_DEADLINE without a netlink event; a closed event stream reconnects.
             if let Ok(None) = tokio::time::timeout(RESYNC_DEADLINE, events.next()).await {
@@ -287,6 +291,15 @@ async fn read_report() -> Option<UpdateReport> {
         }
     }
     None
+}
+
+/// Sends a datagram to `ETHERNET_HOST` so the kernel broadcasts an ARP request for it. Failures are only logged.
+fn probe_ethernet_host() {
+    let result = std::net::UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0))
+        .and_then(|socket| socket.send_to(&[0], (ETHERNET_HOST, 9)));
+    if let Err(error) = result {
+        eprintln!("ARP probe to {ETHERNET_HOST} failed due to {error}");
+    }
 }
 
 /// Reads eth0's carrier and the neighbour state of `ETHERNET_HOST`, or `None` if a netlink query fails.

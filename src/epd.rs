@@ -13,6 +13,19 @@ const PIN_RST: u32 = 17;
 const PIN_DC: u32 = 25;
 const PIN_BUSY: u32 = 24;
 
+/// Logical landscape canvas that views render into, packed one bit per pixel in rows.
+pub const LOGICAL_WIDTH: usize = HEIGHT;
+pub const LOGICAL_HEIGHT: usize = WIDTH_BYTES * 8;
+pub const LOGICAL_ROW_BYTES: usize = LOGICAL_WIDTH.div_ceil(8);
+pub const LOGICAL_FRAME_LEN: usize = LOGICAL_ROW_BYTES * LOGICAL_HEIGHT;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Orientation {
+    #[allow(dead_code)]
+    Deg90,
+    Deg270,
+}
+
 type Result<T> = std::io::Result<T>;
 
 pub struct Epd {
@@ -20,6 +33,7 @@ pub struct Epd {
     rst: Request,
     dc: Request,
     busy: Request,
+    pub orientation: Orientation,
 }
 
 impl Epd {
@@ -51,7 +65,13 @@ impl Epd {
             .request()
             .map_err(io::Error::other)?;
 
-        Ok(Self { spi, rst, dc, busy })
+        Ok(Self {
+            spi,
+            rst,
+            dc,
+            busy,
+            orientation: Orientation::Deg270,
+        })
     }
 
     fn reset(&mut self) -> Result<()> {
@@ -142,9 +162,11 @@ impl Epd {
         Ok(())
     }
 
-    pub fn show_frame(&mut self, frame: &[u8]) -> Result<()> {
+    /// Rotates a logical landscape frame into the panel's portrait layout using `self.orientation`.
+    pub fn show_frame(&mut self, logical: &[u8]) -> Result<()> {
+        let frame = to_portrait(logical, self.orientation);
         self.init()?;
-        self.show(frame)?;
+        self.show(&frame)?;
         self.sleep_mode()
     }
 
@@ -157,8 +179,46 @@ impl Epd {
 
 impl Drop for Epd {
     fn drop(&mut self) {
-        if let Err(error) = self.show_frame(&[0xFF; FRAME_LEN]) {
+        if let Err(error) = self.show_frame(&[0xFF; LOGICAL_FRAME_LEN]) {
             eprintln!("wipe on drop failed due to {error}");
         }
+    }
+}
+
+/// Converts the logical landscape frame into the panel's portrait byte layout (1 = white, 0 = black).
+fn to_portrait(logical: &[u8], orientation: Orientation) -> Vec<u8> {
+    let mut frame = vec![0xFF; FRAME_LEN];
+    for y in 0..LOGICAL_HEIGHT {
+        for x in 0..LOGICAL_WIDTH {
+            let on = logical[y * LOGICAL_ROW_BYTES + x / 8] & (0x80 >> (x % 8)) == 0;
+            if !on {
+                continue;
+            }
+            let (px, py) = match orientation {
+                Orientation::Deg90 => ((LOGICAL_HEIGHT - 1) - y, x),
+                Orientation::Deg270 => (y, (LOGICAL_WIDTH - 1) - x),
+            };
+            frame[py * WIDTH_BYTES + px / 8] &= !(0x80 >> (px % 8));
+        }
+    }
+    frame
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn to_portrait_rotates_top_left_pixel() {
+        let mut logical = vec![0xFF; LOGICAL_FRAME_LEN];
+        logical[0] &= !0x80;
+
+        let deg90 = to_portrait(&logical, Orientation::Deg90);
+        assert_eq!(deg90[WIDTH_BYTES - 1], 0xFE);
+        assert_eq!(deg90.iter().filter(|&&byte| byte != 0xFF).count(), 1);
+
+        let deg270 = to_portrait(&logical, Orientation::Deg270);
+        assert_eq!(deg270[(LOGICAL_WIDTH - 1) * WIDTH_BYTES], 0x7F);
+        assert_eq!(deg270.iter().filter(|&&byte| byte != 0xFF).count(), 1);
     }
 }

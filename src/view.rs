@@ -1,7 +1,8 @@
 //! View: renders the model into a frame without changing state.
+use crate::WIDTH_BYTES;
 use crate::area::{Area, Rect};
+use crate::epd::{LOGICAL_FRAME_LEN, LOGICAL_ROW_BYTES};
 use crate::model::{Model, UpdateReport};
-use crate::{FRAME_LEN, WIDTH_BYTES};
 use embedded_graphics::image::Image;
 use embedded_graphics::mono_font::MonoTextStyle;
 use embedded_graphics::mono_font::ascii::{FONT_6X10, FONT_7X13_BOLD, FONT_10X20};
@@ -49,7 +50,7 @@ const UNAVAILABLE: &str = "---";
 
 /// Renders the model into a frame. Pure: the frame depends only on the model.
 pub fn view(model: &Model) -> Vec<u8> {
-    let mut frame = vec![0xFFu8; FRAME_LEN];
+    let mut frame = vec![0xFFu8; LOGICAL_FRAME_LEN];
     let mut canvas = Canvas { frame: &mut frame };
     draw_frame(model, &mut canvas).expect("drawing to an in-memory canvas cannot fail");
     frame
@@ -274,7 +275,7 @@ impl DrawTarget for Canvas<'_> {
     type Color = BinaryColor;
     type Error = Infallible;
 
-    // Landscape (x, y) maps to portrait (127 - y, x), matching a 90 degree clockwise rotation.
+    // Packs the landscape canvas one bit per pixel, 1 = white (cleared to 0 when On).
     fn draw_iter<I>(&mut self, pixels: I) -> std::result::Result<(), Infallible>
     where
         I: IntoIterator<Item = Pixel<BinaryColor>>,
@@ -283,10 +284,9 @@ impl DrawTarget for Canvas<'_> {
             if x < 0 || y < 0 || x >= WIDTH || y >= HEIGHT {
                 continue;
             }
-            let px = (HEIGHT as usize - 1) - y as usize;
-            let py = x as usize;
-            let idx = py * WIDTH_BYTES + px / 8;
-            let bit = 0x80 >> (px % 8);
+            let (x, y) = (x as usize, y as usize);
+            let idx = y * LOGICAL_ROW_BYTES + x / 8;
+            let bit = 0x80 >> (x % 8);
             match color {
                 BinaryColor::On => self.frame[idx] &= !bit,
                 BinaryColor::Off => self.frame[idx] |= bit,
@@ -343,21 +343,12 @@ mod tests {
     }
 
     /// Renders the landscape frame as a PBM (P4) bitmap, 1 bit per pixel, MSB first, 1 = black.
-    /// Inverts the mapping in `Canvas`.
+    /// The frame is already packed in the PBM row layout, so only the bit value is inverted.
     fn frame_to_pbm(frame: &[u8]) -> Vec<u8> {
-        let row_bytes = (WIDTH as usize).div_ceil(8);
         let mut pbm = format!("P4\n{WIDTH} {HEIGHT}\n").into_bytes();
         for y in 0..HEIGHT as usize {
-            let mut row = vec![0u8; row_bytes];
-            for x in 0..WIDTH as usize {
-                let px = (HEIGHT as usize - 1) - y;
-                let py = x;
-                let on = frame[py * WIDTH_BYTES + px / 8] & (0x80 >> (px % 8)) == 0;
-                if on {
-                    row[x / 8] |= 0x80 >> (x % 8);
-                }
-            }
-            pbm.extend_from_slice(&row);
+            let row = &frame[y * LOGICAL_ROW_BYTES..(y + 1) * LOGICAL_ROW_BYTES];
+            pbm.extend(row.iter().map(|byte| !byte));
         }
         pbm
     }
